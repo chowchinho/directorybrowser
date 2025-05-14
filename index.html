@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Folder Browser</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    input, button { padding: 8px; font-size: 16px; margin-top: 10px; }
+    ul { list-style-type: none; padding: 0; margin-top: 10px; }
+    li { padding: 4px 0; cursor: pointer; }
+    li:hover { background-color: #f0f0f0; }
+    #status { margin-bottom: 10px; color: gray; font-size: 14px; }
+    .base-dir-button {
+      display: inline-block;
+      margin: 5px 10px 5px 0;
+      padding: 6px 12px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background-color: #f0f0f0;
+      cursor: pointer;
+    }
+    .base-dir-button:hover {
+      background-color: #e0e0e0;
+    }
+    .base-dir-button.active {
+      background-color: #d0e8ff;
+      border-color: #3399ff;
+    }
+  </style>
+</head>
+<body>
+  <!-- Last scanned -->
+  <div id="status">Last scanned: loading...</div>
+  
+  <!-- Refresh button -->
+  <button id="refresh-button">Refresh Cache Now</button>
+
+  <!-- Search box -->
+  <h3>Search Folder Path</h3>
+  <input type="text" id="search" placeholder="Type folder name...">
+  <ul id="results"></ul>
+
+  <!-- Flat list of base dirs -->
+  <h3>Base Directories</h3>
+  <div id="base-dir-list"></div>
+
+  <!-- Subfolders of selected base dir -->
+  <h3>Subfolders</h3>
+  <ul id="subfolder-list"></ul>
+
+  <script>
+    const baseDirList = document.getElementById("base-dir-list");
+    const subfolderList = document.getElementById("subfolder-list");
+    const input = document.getElementById("search");
+    const results = document.getElementById("results");
+    const status = document.getElementById("status");
+    const refreshButton = document.getElementById("refresh-button");
+
+    let currentBaseDir = null;
+
+    async function loadBaseDirs() {
+      const res = await fetch("/base_dirs");
+      const dirs = await res.json();
+
+      baseDirList.innerHTML = "";
+      dirs.forEach(dir => {
+        const button = document.createElement("button");
+        button.className = "base-dir-button";
+        button.textContent = dir;
+        button.addEventListener("click", () => {
+          document.querySelectorAll(".base-dir-button").forEach(btn => btn.classList.remove("active"));
+          button.classList.add("active");
+          currentBaseDir = dir;
+          loadSubfolders(dir);
+        });
+        baseDirList.appendChild(button);
+      });
+
+      if (dirs.length > 0) {
+        currentBaseDir = dirs[0];
+        document.querySelector(".base-dir-button").classList.add("active");
+        loadSubfolders(currentBaseDir);
+      }
+    }
+
+    async function loadSubfolders(baseDir) {
+      const res = await fetch(`/list_subfolders?dir=${encodeURIComponent(baseDir)}`);
+      const data = await res.json();
+      subfolderList.innerHTML = "";
+      data.forEach(folder => {
+        const li = document.createElement("li");
+        li.textContent = folder;
+        li.title = "Click to copy";
+        li.addEventListener("click", () => copyTextToClipboard(folder, li));
+        subfolderList.appendChild(li);
+      });
+    }
+
+    async function loadStatus() {
+      const res = await fetch("/status");
+      const data = await res.json();
+      status.textContent = "Last scanned: " + data.last_scanned;
+    }
+
+    // Debounced search
+    let timeout;
+    input.addEventListener("input", () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(async () => {
+        const query = input.value;
+        if (query.length < 1) {
+          results.innerHTML = "";
+          return;
+        }
+
+        const response = await fetch(`/search?q=${encodeURIComponent(query)}`);
+        const data = await response.json();
+
+        results.innerHTML = "";
+        data.forEach(path => {
+          const li = document.createElement("li");
+          li.textContent = path;
+          li.title = "Click to copy";
+          li.addEventListener("click", () => copyTextToClipboard(path, li));
+          results.appendChild(li);
+        });
+      }, 300);
+    });
+
+    refreshButton.addEventListener("click", async () => {
+      status.textContent = "Refreshing cache...";
+      await fetch("/refresh", { method: "POST" });
+      setTimeout(loadStatus, 3000);
+    });
+
+    // Clipboard copy with fallback
+    function copyTextToClipboard(text, el) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          showCopyFeedback(el);
+        }).catch(() => {
+          fallbackCopy(text, el);
+        });
+      } else {
+        fallbackCopy(text, el);
+      }
+    }
+
+    function fallbackCopy(text, el) {
+      const tempInput = document.createElement("textarea");
+      tempInput.value = text;
+      document.body.appendChild(tempInput);
+      tempInput.select();
+      try {
+        document.execCommand("copy");
+        showCopyFeedback(el);
+      } catch (err) {
+        alert("Copy failed: " + err);
+      }
+      document.body.removeChild(tempInput);
+    }
+
+    function showCopyFeedback(el) {
+      el.style.backgroundColor = "#d0ffd0";
+      setTimeout(() => el.style.backgroundColor = "", 500);
+    }
+
+    // Init
+    loadBaseDirs();
+    loadStatus();
+  </script>
+</body>
+</html>
